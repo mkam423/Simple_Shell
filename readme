@@ -1,0 +1,33 @@
+
+
+File: linux2.cpp
+
+Group members and contributions: 
+	Steven Nguyen: Creating and designing the parsing functions that 
+			includes the parsing the main command line after 
+			breaking strings into multiple parts. Crafted the 
+			design and implementation of the built-in function 
+			functions. Deallocated memory with functions.
+
+	Brandon No: Reviewed and troubleshooted parsing functions. In depth
+			tracing of code to fix memory leaks and accounted for
+			basic system requirements with the allocation of 
+			memory. Research of pipelining and reassuring the 
+			proper development of commands. Makefile development.
+
+	Mason Kam: Traced, debugged and implemented parsing functions. 
+			Cleaning and organization of code, documentations, 
+			and improving efficiency. Makefile development.
+
+	All: Creation and implementation of all of the pipelining functions 
+		(runSource(), runDest(), runPipe()). Debugged, tested, ran
+		the program testing for issues with single commands and multi
+		commands. Identified any mishaps and errors with pipelining.
+
+Highlights of design and implementation:
+	Our program minimizes length of main to its most basic form. The 
+	program has a method of layering and spliting the parsing of a line
+	to multiple functions in order to prevent excessively long functions.
+	Parsing also takes care of linking commands in the form of a linked
+	list. Program is able to take care of multiple cds in pipeline.
+	Ex1. cd | cd | cd will return nothing just as the linux shell.

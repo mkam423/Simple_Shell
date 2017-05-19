@@ -1,0 +1,580 @@
+//Steven Nguyen, Brandon No, Mason Kam
+//linux2.cpp
+//Purpose: To be able to create a working shell that runs one commands,
+//  or a pipeline of commands that prints the exit status for each process
+//  after the command is terminated.
+//Input: Command(s): Either single, or multiple that will be pipelined
+//Process: Parsing, forking child, executing commands, and pipling commands.
+//Output: Result of command(s) given.
+
+#include<iostream>
+#include<string>
+#include<vector>
+#include<sys/wait.h>
+#include<stdlib.h> //For exit function
+using namespace std;
+
+struct ComdList
+{
+  char ** args;
+  ComdList *next;
+};
+
+struct BuiltinCmd{
+  string name;
+  int (*func)(char**);
+};
+
+int builtinCD(char **args);
+//Handles cd command
+
+int builtinexit(char **args); //Not made
+//Handles exit command
+
+int parseString(string _mainCommand, ComdList *&_head);
+//Pre: none
+//Post: subCommand is maybe empty
+//return number of commands
+
+void commandParse(vector<string> const &_subCommand,
+				  ComdList *&_head, int numOfComds);
+//Parses one command line
+
+void tokenCopy(string _temp, char **_args, int loc); //Not Made
+
+
+void addComd(ComdList *&_head, vector<string> const &_args);
+//Insert command in linked list
+
+void externalFunc(ComdList *&_head, int _numComds);
+//Handles commands
+
+void pipeline(ComdList *&_head, int _numComds); 
+//Handles piping commands
+
+void del(ComdList *&_head);
+//Deallocates one node
+
+void delChar(char **&_args);
+//Deallocates enter list
+
+void runSource(int pfd[], char **args);
+//Handles first pipe
+
+void runDest(int pfd[], char **args);
+//Handles last pipe
+
+void runPipe(int in[], int out[], char** args);
+//Handles intermediate pipes if more than one
+
+void runFunc(ComdList *&_head, int _numComds);
+
+
+string builtinFunc(BuiltinCmd _table[],
+				   ComdList *&_head, string _dir, int _num); //Not made
+
+int isBuiltin(BuiltinCmd _table[], ComdList *&_head);
+//Check if command is built in
+
+const int MAXARGS = 50,
+  MAXTOKEN = 100,
+  TABLESIZE = 2,
+  CLEAR = 50;
+
+string dir = "";
+BuiltinCmd cmdTable[TABLESIZE];
+
+int main()
+{
+  bool done = false;
+  string mainCommand; 
+  ComdList *ComdListHead = 0;//, *temp;
+  int numComds;// funcNum, checkBuiltin;
+
+  for(int a = 0; a < CLEAR; a++)
+	cout << endl;
+
+  for(int i = 0; i < TABLESIZE; i++)
+	switch (i){
+	case 0:
+	  cmdTable[i].name = "cd";
+	  cmdTable[i].func = &builtinCD;
+	  break;
+	case 1:
+	  cmdTable[i].name = "exit";
+	  cmdTable[i].func = 0;
+	  break;
+	}
+  
+  cout << "[Test~]$ ";
+  getline(cin, mainCommand);
+
+  while(!done){
+	numComds = parseString(mainCommand, ComdListHead);
+	runFunc(ComdListHead, numComds);
+	//ComdListHead = 0;
+	del(ComdListHead);
+	cout << endl << "[Test~" << dir << "]$ ";
+	getline(cin, mainCommand);
+	if(mainCommand == "done")
+	  done = true;
+  }
+
+  cout << endl << endl << endl;
+  
+  return 0;
+}
+
+
+int parseString(string _mainCommand, ComdList *&_head)
+{
+  vector<string> subCommand;
+  string temp;
+  int count = 0;
+  
+  //Get each command and put it in to the string vector
+  for(unsigned i = 0; i < _mainCommand.length(); i++)
+	  //Dealing with " "
+	if(_mainCommand[i] == '\"'){
+	  if(temp == "")
+		count++;
+	  temp += _mainCommand[i];
+	  i++;
+	  while(_mainCommand[i] != '\"'){
+		temp += _mainCommand[i];
+		i++;
+	  }
+	  temp += _mainCommand[i];
+
+	  //Dealing with ' '
+	}else if(_mainCommand[i] == '\''){
+	  if(temp == "")
+		count++;
+	  temp += _mainCommand[i];
+	  i++;
+	  while(_mainCommand[i] != '\''){
+		temp += _mainCommand[i];
+		i++;
+	  }
+	  temp += _mainCommand[i];
+	  
+	  //Dealing with |
+	}else if(_mainCommand[i] == '|'){
+	  subCommand.push_back(temp);
+	  temp = "";
+	  
+	}else{
+	  if(temp == "")
+		count++;
+	  temp += _mainCommand[i];
+	}
+
+  subCommand.push_back(temp);
+  commandParse(subCommand, _head, count);  
+
+  /*
+  for(vector<string> :: iterator i = subCommand.begin();
+	  i != subCommand.end(); i++)
+	cout << *i << endl;
+  */
+	
+  return count;
+}
+
+
+void commandParse(vector<string> const&_subCommand,
+				  ComdList *&_head, int numOfComds)
+{
+  vector<string> token;  
+  string tempCommand, tempToken = "";
+  int tokenCount = 0;
+  
+  for(int i = 0; i < numOfComds; i++){
+	tempCommand = _subCommand[i];
+
+	for(unsigned j = 0; j < tempCommand.length(); j++){
+	    //Dealing with " "
+	  if(tempCommand[j] == '\"'){
+		if(tempToken == "")
+		  tokenCount++;
+		else{
+		  token.push_back(tempToken);
+		  tempToken = "";
+		}
+		j++;
+		while(tempCommand[j] != '\"'){
+		  tempToken += tempCommand[j];
+		  j++;
+		}
+		
+		token.push_back(tempToken);
+		tempToken = "";
+
+		//Dealing with ' '
+	  }else if(tempCommand[j] == '\''){
+		if(tempToken == "")
+		  tokenCount++;
+		else{
+		  token.push_back(tempToken);
+		  tempToken = "";
+		}
+		j++;
+		while(tempCommand[j] != '\''){
+		  tempToken += tempCommand[j];
+		  j++;
+		}
+		
+		token.push_back(tempToken);
+		tempToken = "";
+
+		//Dealing with space
+	  }else if (tempCommand[j] == ' '){
+		if(tempToken != ""){
+		  tokenCount++;
+		  token.push_back(tempToken);
+	 	  tempToken = "";
+		}
+
+	  }else{
+		tempToken += tempCommand[j];
+	  }
+	}
+	
+	tokenCount++;
+	
+	if(tempToken != "")
+	  token.push_back(tempToken);
+	
+	tempToken = "";
+	addComd(_head, token);
+	token.clear();
+	tokenCount = 0;
+  }
+  
+}
+
+
+void addComd(ComdList *&_head, vector<string> const &_args)
+{  
+  char** tempArgs = new char*[_args.size() + 1];
+  ComdList *temptr;
+  
+  //cout << "Num of Token:: " << _args.size() << endl;;
+  for(unsigned i = 0; i < _args.size(); i++){
+	//cout << "Token " << i << endl;
+	//delete [] tempArgs[i];
+	//cout << "Length of token: " << _args[i].length() << endl;
+	tempArgs[i] = new char[MAXTOKEN];
+	//cout << "char length by traits: "
+	// << char_traits<char>::length(tempArgs[i]) << endl;
+	//cout << "char length by strlen: " << strlen(tempArgs[i]) << endl;
+	
+	//delete [] tempArgs[i];
+	//tempArgs[i] = new char[_args[i].length()];
+	//while(strlen(tempArgs[i]) != 0){
+	//cout << strlen(tempArgs[i]) << endl;
+	//cin.ignore();
+	//delete void addComd(ComdList *&_head, vector<string> const &_args)
+	  
+   	//cout << " " << _args[i] << endl;
+	for(unsigned j = 0; j < _args[i].length(); j++){
+	  tempArgs[i][j] = _args[i][j]; 
+	  //cout << tempArgs[i][j] << endl;
+	}	
+  }
+  
+  tempArgs[_args.size()] = 0;
+  
+  if(_head == 0){
+	_head = new ComdList;
+	_head->next = 0;
+	_head->args = tempArgs;
+
+	/*
+	for(unsigned i = 0; i < _args.size(); i++){
+	  
+	  cout << "char length by temp 2: " << strlen(tempArgs[i]) << " ";
+	  cout << ",char length by args 2: " << strlen(_head->args[i]) << endl;
+	  
+	  cout << '[';
+	  for(unsigned j = 0; j < strlen(_head->args[i]); j++)
+		cout << _head->args[i][j];
+	  cout << ']';
+	  cout << endl;
+	}
+	*/
+	
+  }else{
+	temptr = _head;
+	while(temptr->next != 0)
+	  temptr = temptr->next;
+	
+	temptr->next = new ComdList;
+	temptr = temptr->next;
+	temptr->next = 0;
+	temptr->args = tempArgs;
+
+	/*
+	for(unsigned i = 0; i < _args.size(); i++){
+	  cout << "char length 2: " << strlen(temptr->args[i]) << " ";
+	  cout << '[';
+	  for(unsigned j = 0; j < _args[i].length(); j++)
+		cout << temptr->args[i][j];
+	  cout << ']' << endl;
+	}
+	*/
+  }
+
+}
+
+
+void externalFunc(ComdList *&_head, int _numComds)
+{
+  int pid, status;
+  
+  if(_numComds == 1){
+	switch(pid = fork()){
+	case 0:
+	  //cout << "This is child: " << pid << endl;
+	  execvp(_head->args[0], _head->args);
+	  perror(_head->args[0]);
+	default:
+	  //cout << "This is parent: " << pid << endl;
+	  while((pid = wait(&status)) != -1)
+		cout << "Process " << pid << " exit with "
+			 << WEXITSTATUS(status) << endl;
+	  break;
+	case -1:
+	  perror("fork");
+	  exit(1);
+	}
+  }else
+	pipeline(_head, _numComds);
+}
+
+
+void pipeline(ComdList *&_head, int _numComds)
+{
+  int pid, status;
+  ComdList *temp = _head;
+  int **fd = new int*[_numComds - 1];
+  
+  for(int i = 0; i < _numComds - 1; i++)
+	fd[i] = new int[2];
+  for(int i = 0; i < _numComds - 1; i++)
+	pipe(fd[i]);
+  
+  runSource(fd[0], temp->args);
+
+  for(int i = 0; i < _numComds-2; i++){
+	temp = temp->next;
+	runPipe(fd[i+1], fd[i], temp->args);
+	close(fd[i][0]);
+	close(fd[i][1]);
+  }
+  
+  temp = temp->next;
+  runDest(fd[_numComds-2], temp->args);
+
+  for(int i = 0; i < _numComds - 1; i++){
+	close(fd[i][0]);
+	close(fd[i][1]);
+  }
+  
+  while((pid = wait(&status)) != -1)
+	cout << "Process " << pid << " exit with "
+		 << WEXITSTATUS(status) << endl;
+}
+
+
+int isBuiltin(BuiltinCmd _table[], ComdList *&_head)
+{
+  string temp(_head->args[0]);
+  
+  for(int i = 0; i < TABLESIZE; i++)
+	if(temp == _table[i].name){
+	  return i;
+	}
+  
+  return -1;
+}
+
+
+int builtinCD(char **args)
+{
+  int count = 0, check;
+  //char *temp;
+  while(args[count] != 0)
+	count++;
+  
+  if(count > 2)
+	return -1;
+  else
+	if(args[1] == 0){
+	  check = chdir(getenv("HOME"));
+	  //temp = getcwd(args[1], 0);
+	}
+	else{
+	  check = chdir(args[1]);
+	  //temp = getcwd(args[1], strlen(args[1]));
+	}
+  //for(unsigned i = 0; i < strlen(temp); i++)
+  //cout << temp[i];
+  
+  return check;
+}
+
+/*
+int buillinexit(char **args){
+  int count = 0;
+  if(args[1] == 0)
+	return exit(0);
+  else
+	return exit((int)args[1]);
+	}
+*/
+
+void del(ComdList *&_head)
+{
+  ComdList *delptr = _head;
+  while(_head != 0){
+	delptr = _head;
+	_head = _head->next;
+	//delChar(delptr->args);
+	delete delptr;
+  }
+}
+
+
+void delChar(char **&_args)
+{
+  int count = 0;
+  
+  if(_args != 0){
+	while(_args[count] != 0){
+	  delete [](_args[count]);
+	  cout << count << endl;
+	  count++;
+	}
+	delete []_args;
+  }
+}
+
+
+void runSource(int pfd[], char ** args)
+{
+  /*
+  for(unsigned i = 0; i < strlen(args); i++){
+	for(unsigned j = 0; j < strlen(args[i]); j++)
+	  cout << _head->args[i][j];
+	cout << endl;
+	}
+  */
+  int pid;
+  
+  switch(pid = fork()){
+  case 0:
+	dup2(pfd[1], 1);
+	close(pfd[0]);
+	execvp(args[0], args);
+	perror(args[0]);
+  default:
+	break;
+  case -1:
+	perror("fork");
+	exit(1);
+  }
+}
+
+
+void runPipe(int in[], int out[], char** args)
+{
+  int pid;
+  
+  switch(pid = fork()){
+  case 0:
+	dup2(out[0], 0); //out from the previous pipe
+	close(out[1]);
+	dup2(in[1], 1); //in to the next pipe
+	close(in[0]);
+	execvp(args[0], args);
+	perror(args[0]);
+  default:
+	break;
+  case -1:
+	perror("fork");
+	exit(1);
+  }  
+}
+
+
+void runDest(int pfd[], char **args)
+{
+  int pid;
+  
+  switch(pid = fork()){
+  case 0:
+	dup2(pfd[0], 0);
+	close(pfd[1]);
+	execvp(args[0], args);
+	perror(args[0]);
+  default:
+	break;
+  case -1:
+	perror("fork");
+	exit(1);
+  }
+}
+
+
+void runFunc(ComdList *&_head, int _numComds)
+{
+  ComdList *temp, *del;
+  int funcNum, checkBuiltin;
+  
+  if(_numComds > 1){	
+	temp = _head;
+	while(temp != 0){
+	  funcNum = isBuiltin(cmdTable, temp);
+	  cout << "funcNum: " << funcNum << endl;
+	  if(funcNum > -1){
+		while(_head != temp){
+		  del = _head;
+		  _head = _head->next;
+		  delChar(del->args);
+		  delete del;
+		  _numComds--;
+		}
+	  }
+	  temp = temp->next;
+	}
+	if(isBuiltin(cmdTable, _head) > -1){
+	  del = _head;
+	  _head = _head->next;
+	  delete del;
+	  _numComds--;
+	  if(_head == 0)
+		return;
+	}
+  }
+
+  funcNum = isBuiltin(cmdTable, _head);
+	
+  if(funcNum == -1){
+	externalFunc(_head, _numComds);
+  }else{
+	checkBuiltin = cmdTable[funcNum].func(_head->args);
+	if(funcNum == 0)
+	  if(checkBuiltin == -1)
+		cout << "There is no such directory" << endl;
+	  else{
+		if(_head->args[1] == 0)
+		  dir = "";
+		else{
+		  dir = "";
+		  for(unsigned i = 0; i < (strlen(_head->args[1])); i++)
+			dir += (_head->args)[1][i];
+		}
+	  }
+  }
+}

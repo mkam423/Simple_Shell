@@ -1,0 +1,9 @@
+
+
+File: linux2.cpp
+Group members and contributions: 
+	Steven Nguyen: Creating and designing the parsing functions that 
+			includes the parsing the main command line after 
+			breaking strings into multiple parts. 
+	Brandon No: Reviewed and troubleshooted parsing functions.
+	Mason Kam:
